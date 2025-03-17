@@ -3,7 +3,7 @@
  * tyler boni <tyler.boni@gmail.com>
  */
 
-#define DEBUG 1
+// #define DEBUG 1
 
 #include <errno.h>
 #include <fcntl.h>
