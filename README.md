@@ -3,7 +3,7 @@
 This is a magisk module and requires a rooted android phone with magisk installed.
 <a href="https://dev.to/tylerboni/escaping-the-digital-treadmill-how-to-daily-drive-a-flip-phone-in-2025-tcl-flip-2-17el" target="_blank"> It was originally created for my blog, where you can read about my dumbphone journey. </a>
 
-A virtual mouse driver for the TCL FLIP 2 (and other compatible devices) that allows you to transform your keypad into a fully functional mouse.
+A virtual mouse driver ([inspired by neutronscotts vmouse2](https://github.com/neutronscott/flip2)) for the TCL FLIP 2 (and other compatible devices) that allows you to transform your keypad into a fully functional mouse.
 
 ## Overview
 
