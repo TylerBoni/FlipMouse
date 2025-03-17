@@ -275,7 +275,6 @@ static int mouse_init(void)
     app_state.mouse.dev = NULL;
     return -1;
   }
-
   /* Initialize mouse parameters */
   app_state.mouse.enabled = 0;
   app_state.mouse.speed = 4;
