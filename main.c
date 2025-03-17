@@ -3,6 +3,8 @@
  * tyler boni <tyler.boni@gmail.com>
  */
 
+#define DEBUG 1
+
 #include <errno.h>
 #include <fcntl.h>
 #include <linux/input.h>
@@ -20,7 +22,6 @@
 /* Configuration */
 #define DEV_INPUT "/dev/input"
 #define LOG_FILE "/cache/FlipMouse.log"
-// #define DEBUG 0
 #ifdef DEBUG
 #define ENABLE_LOG 1
 #else
@@ -30,6 +31,7 @@
 /* Constants */
 #define MIN_MOUSE_SPEED 1
 #define WHEEL_SLOWDOWN_FACTOR 5
+#define MAX_TOGGLE_HOLD_TIME 1
 
 /* Event action return codes */
 typedef enum
@@ -61,6 +63,7 @@ typedef struct dev_st
 typedef struct
 {
   int enabled;
+  int toggle_down_at;
   int speed;
   int drag_mode;
   struct libevdev *dev;
@@ -93,6 +96,7 @@ static const keymap_t keypad_keymap[] = {
     {34, KEY_RIGHT},
     {33, KEY_MENU}, /* scroll up */
     {2, KEY_SEND},  /* scroll down */
+    {42, KEY_HELP}  /* Star key */
 };
 
 static const keymap_t laptop_keymap[] = {
@@ -102,6 +106,7 @@ static const keymap_t laptop_keymap[] = {
     {205, KEY_RIGHT},
     {17, KEY_MENU},
     {31, KEY_SEND},
+    {88, KEY_HELP} /* F12 key */
 };
 
 /* Global application state */
@@ -111,7 +116,7 @@ static app_state_t app_state = {0};
 /* Mouse handling */
 static int mouse_init(void);
 static void mouse_cleanup(void);
-static int mouse_toggle(void);
+static int mouse_toggle(struct input_event *ev);
 static int mouse_handle_event(device_t *dev, struct input_event *ev);
 
 /* Device handling */
@@ -119,6 +124,7 @@ static int devices_find_and_init(void);
 static void devices_cleanup(void);
 
 /* Event handling */
+static int get_toggle_time(int event_time);
 static int handle_input_event(device_t *dev, struct input_event *ev);
 static int keymap_get_keycode(int scanvalue);
 static int keymap_get_scanvalue(int keycode);
@@ -295,14 +301,43 @@ static void mouse_cleanup(void)
 
   log_message("Virtual mouse resources released");
 }
-
-static int mouse_toggle(void)
+// mouse_toggle(ev)
+static int mouse_toggle(struct input_event *ev)
 {
-  app_state.mouse.enabled = !app_state.mouse.enabled;
-  log_message("Mouse mode %s", app_state.mouse.enabled ? "enabled" : "disabled");
-  return CHANGED_TO_MOUSE;
+  if (ev->value == 1)
+  { /* Key press, not release */
+    app_state.mouse.toggle_down_at = ev->input_event_sec;
+    return CHANGED_TO_MOUSE;
+  }
+  else if (ev->value == 0 && app_state.mouse.toggle_down_at != 0)
+  {
+    /* if the key was pressed for less than time second, toggle mouse mode */
+    if (get_toggle_time(ev->input_event_sec) < MAX_TOGGLE_HOLD_TIME)
+    {
+      app_state.mouse.enabled = !app_state.mouse.enabled;
+      app_state.mouse.toggle_down_at = 0;
+      log_message("Mouse mode %s", app_state.mouse.enabled ? "enabled" : "disabled");
+      return CHANGED_TO_MOUSE;
+    }
+    return CHANGED_TO_MOUSE;
+  }
+  else
+  {
+    return MUTE_EVENT;
+  }
 }
+static int get_toggle_time(int event_time)
+{
+  if (app_state.mouse.toggle_down_at == 0)
+  {
+    /* toggle key is not down */
+    return 0;
+  }
 
+  int timediff = event_time - app_state.mouse.toggle_down_at;
+  log_message("Toggle key held for %d seconds", timediff);
+  return timediff;
+}
 static int mouse_handle_event(device_t *dev, struct input_event *ev)
 {
   static unsigned int slowdown_counter = 0;
@@ -578,20 +613,42 @@ static void devices_cleanup(void)
 }
 
 /* --- Event Handling Functions --- */
-
 static int handle_input_event(device_t *dev, struct input_event *ev)
 {
+  if (ev->type == MSC_SCAN && ev->code == MSC_SCAN)
+  {
+    int keycode = keymap_get_keycode(ev->value);
+    if (keycode == KEY_HELP || keycode == KEY_F12)
+    {
+      int td = app_state.mouse.toggle_down_at;
+      if (get_toggle_time(ev->input_event_sec) > MAX_TOGGLE_HOLD_TIME)
+      {
+        if (td > 1)
+        {
+          app_state.mouse.toggle_down_at = 1;
+        }
+        else if (td == 1)
+        {
+          app_state.mouse.toggle_down_at = 0;
+        }
+        else
+        {
+          return MUTE_EVENT;
+        }
+        /* Send Mock event */
+        log_message("Trigger default button");
+        ev->type = EV_KEY;
+        ev->code = keycode;
+        ev->value = app_state.mouse.toggle_down_at;
+        return CHANGED_EVENT;
+      }
+    }
+  }
   /* Check if it's the toggle key */
   if (ev->type == EV_KEY)
   {
     if (ev->code == KEY_HELP || ev->code == KEY_F12)
-    {
-      if (ev->value == 1)
-      { /* Key press, not release */
-        return mouse_toggle();
-      }
-      return CHANGED_TO_MOUSE;
-    }
+      return mouse_toggle(ev);
   }
 
   /* If not in mouse mode, just pass through */
