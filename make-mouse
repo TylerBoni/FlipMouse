@@ -1,0 +1,142 @@
+#!/bin/bash
+# Exit on error
+set -e
+
+# Parse command line arguments
+DEBUG_MODE=0
+for arg in "$@"; do
+    case $arg in
+    --debug)
+        DEBUG_MODE=1
+        shift
+        ;;
+    esac
+done
+
+CWD=$(pwd)
+
+if [ $DEBUG_MODE -eq 1 ]; then
+    echo "=== Running in DEBUG mode for Linux ==="
+
+    # Create tmp directory
+    TMP_DIR="$CWD/.debug"
+    mkdir -p "$TMP_DIR"
+
+    # Build libevdev for host if not already installed
+    if ! pkg-config --exists libevdev; then
+        echo "Building libevdev for host system..."
+        cd "$TMP_DIR"
+        if [ ! -f "libevdev-1.13.2.tar.xz" ]; then
+            echo "Downloading libevdev..."
+            wget -nv https://www.freedesktop.org/software/libevdev/libevdev-1.13.2.tar.xz
+        fi
+
+        if [ ! -d "libevdev-1.13.2" ]; then
+            echo "Extracting libevdev..."
+            tar xf libevdev-1.13.2.tar.xz
+        fi
+
+        # Build libevdev for host
+        cd "$TMP_DIR/libevdev-1.13.2"
+        echo "Configuring libevdev for host..."
+        ./configure --prefix="$TMP_DIR/install"
+        echo "Building libevdev..."
+        make -j$(nproc)
+        make install
+
+        LIBEVDEV_CFLAGS="-I$TMP_DIR/install/include -I$TMP_DIR/install/include/libevdev-1.0"
+        LIBEVDEV_LIBS="-L$TMP_DIR/install/lib -levdev"
+    else
+        echo "Using system libevdev"
+        LIBEVDEV_CFLAGS=$(pkg-config --cflags libevdev)
+        LIBEVDEV_LIBS=$(pkg-config --libs libevdev)
+    fi
+
+    # Compile with debug flags
+    cd "$CWD"
+    echo "Building mouse application for Linux with debug flags..."
+    cc -o "$TMP_DIR/mouse" *.c $LIBEVDEV_CFLAGS $LIBEVDEV_LIBS -g -DDEBUG
+
+    echo "=== Build completed (DEBUG mode) ==="
+    echo "Binary is at: $TMP_DIR/mouse"
+
+    # Launch the debug application
+    echo "Launching application in debug mode..."
+    cd "$TMP_DIR"
+    sudo ./mouse
+
+else
+    # Original Android build logic
+    # NDK path - update this to match your setup
+    NDK=$HOME/Android/Sdk/ndk/29.0.13113456
+    API=30
+    TARGET=armv7a-linux-androideabi
+    TOOLCHAIN=$NDK/toolchains/llvm/prebuilt/linux-x86_64
+
+    # Add NDK tools to PATH
+    export PATH=$TOOLCHAIN/bin:$PATH
+
+    # Create build directory in current working directory
+    BUILD_DIR="$CWD/build"
+    mkdir -p "$BUILD_DIR"
+
+    echo "=== Building for Android $API ($TARGET) ==="
+
+    # Download and extract libevdev
+    cd "$BUILD_DIR"
+    if [[ ! -f "install/include/libevdev-1.0/libevdev/libevdev.h" || ! -f "install/include/libevdev-1.0/libevdev/libevdev-uinput.h" ]]; then
+        if [ ! -f "libevdev-1.13.2.tar.xz" ]; then
+            echo "Downloading libevdev..."
+            wget -nv https://www.freedesktop.org/software/libevdev/libevdev-1.13.2.tar.xz
+        fi
+
+        if [ ! -d "libevdev-1.13.2" ]; then
+            echo "Extracting libevdev..."
+            tar xf libevdev-1.13.2.tar.xz
+        fi
+
+        # Build libevdev
+        cd "$BUILD_DIR/libevdev-1.13.2"
+        echo "Configuring libevdev..."
+
+        # Configure with Android toolchain
+        CC="$TOOLCHAIN/bin/clang --target=$TARGET$API" \
+            CXX="$TOOLCHAIN/bin/clang++ --target=$TARGET$API" \
+            AR="$TOOLCHAIN/bin/llvm-ar" \
+            RANLIB="$TOOLCHAIN/bin/llvm-ranlib" \
+            STRIP="$TOOLCHAIN/bin/llvm-strip" \
+            ./configure --host=$TARGET --prefix="$BUILD_DIR/install" \
+            --disable-shared --enable-static
+
+        echo "Building libevdev..."
+        make -j$(nproc)
+        make install
+
+    fi
+    # Now compile the main.c program
+    echo "Building mouse application..."
+    # Assuming main.c is in the current directory
+    cd "$CWD"
+    "$TOOLCHAIN/bin/clang" --target=$TARGET$API \
+        -I"$BUILD_DIR/install/include" \
+        -I"$BUILD_DIR/install/include/libevdev-1.0" \
+        -L"$BUILD_DIR/install/lib" \
+        -o "$BUILD_DIR/mouse" *.c \
+        -levdev
+
+    # Strip binary
+    "$TOOLCHAIN/bin/llvm-strip" "$BUILD_DIR/mouse"
+
+    echo "=== Build completed ==="
+    echo "Binary is at: $BUILD_DIR/mouse"
+
+    # make a zip archive with mouse, ../properties/*
+    if [ -d "$CWD/build/bundle" ]; then
+        rm -r "$CWD/build/bundle"
+    fi
+    mkdir -p "$CWD/build/bundle"
+    cd "$CWD/build/bundle"
+    cp -r $CWD/properties/* .
+    cp "$CWD/build/mouse" .
+    zip -r -FS FlipMouse.zip .
+fi

@@ -1,0 +1,14 @@
+#!/bin/bash
+adb push ./build/bundle/FlipMouse.zip /sdcard/Download
+adb shell su -c rm /cache/FlipMouse.log
+adb shell su -c "magisk --install-module /sdcard/Download/FlipMouse.zip"
+if [ $? -eq 0 ]; then
+    echo "Mouse installed successfully!"
+    # prompt user to reboot
+    read -p "Would you like to reboot now? (y/n) " -n 1 -r
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        adb shell reboot
+    fi
+else
+    echo "Mouse installation failed."
+fi

@@ -1,0 +1,1 @@
+set_perm $MODPATH/mouse 0 0 0755

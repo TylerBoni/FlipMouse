@@ -1,0 +1,13 @@
+#!/bin/bash
+while true; do
+    # Check if any device is connected
+    if adb devices | grep -q "device$"; then
+        # Device is connected, try to access logs
+        echo "Device connected. Attempting to access logs..."
+        adb shell su -c "tail -f /cache/FlipMouse.log"
+        break
+    else
+        echo "No device connected. Waiting for an Android device to connect..."
+        sleep 5
+    fi
+done
