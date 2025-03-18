@@ -4,7 +4,7 @@
  */
 
 // #define DEBUG 1
-
+#include <linux/fb.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <linux/input.h>
@@ -68,6 +68,8 @@ typedef struct
   int drag_mode;
   struct libevdev *dev;
   struct libevdev_uinput *uidev;
+  int position_x;
+  int position_y;
 } mouse_t;
 
 /* Global state */
@@ -79,6 +81,8 @@ typedef struct
   const keymap_t *keymap;
   size_t keymap_size;
   volatile sig_atomic_t running;
+  int screen_width;
+  int screen_height;
 } app_state_t;
 
 /* Device list */
@@ -124,6 +128,7 @@ static int devices_find_and_init(void);
 static void devices_cleanup(void);
 
 /* Event handling */
+static int get_screen_size(int *width, int *height);
 static int get_toggle_time(int event_time);
 static int handle_input_event(device_t *dev, struct input_event *ev);
 static int keymap_get_keycode(int scanvalue);
@@ -204,7 +209,12 @@ static void log_event(const char *prefix, struct input_event *ev)
 {
   if (!ENABLE_LOG || ev->type == EV_SYN)
     return;
-
+  int screenwidth, screenheight;
+  if (get_screen_size(&screenwidth, &screenheight) == -1)
+  {
+    log_message("ERROR: Failed to get screen size");
+    return;
+  }
   char event_info[256];
   snprintf(event_info, sizeof(event_info),
            "%s [%s] Event: time %ld.%06ld, type %d (%s), code %d (%s), value %d",
@@ -280,8 +290,33 @@ static int mouse_init(void)
   app_state.mouse.enabled = 0;
   app_state.mouse.speed = 4;
   app_state.mouse.drag_mode = 0;
+  app_state.mouse.position_x = app_state.screen_width / 2;
+  app_state.mouse.position_y = app_state.screen_height / 2;
 
   log_message("Virtual mouse initialized successfully");
+
+  /* add mouse to devices so we can get events */
+
+  device_t *mouse_dev = malloc(sizeof(device_t));
+  mouse_dev->fd = -1; /* No real fd for virtual device */
+  mouse_dev->name = "Virtual Mouse";
+  mouse_dev->evdev = app_state.mouse.dev;
+  mouse_dev->uidev = app_state.mouse.uidev;
+  mouse_dev->next = app_state.devices;
+  if (!app_state.devices)
+  {
+    log_message("Adding virtual mouse as first device");
+    app_state.devices = mouse_dev;
+  }
+  else
+  {
+    log_message("Adding virtual mouse to device list");
+    device_t *d = app_state.devices;
+    while (d->next)
+      d = d->next;
+    d->next = mouse_dev;
+  }
+
   return 0;
 }
 
@@ -333,10 +368,67 @@ static int get_toggle_time(int event_time)
     /* toggle key is not down */
     return 0;
   }
-
   int timediff = event_time - app_state.mouse.toggle_down_at;
   log_message("Toggle key held for %d seconds", timediff);
   return timediff;
+}
+
+int get_screen_size(int *width, int *height)
+{
+  struct fb_var_screeninfo vinfo;
+  int fb_fd = open("/dev/graphics/fb0", O_RDONLY); // Try primary framebuffer
+
+  if (fb_fd < 0)
+  {
+    fb_fd = open("/dev/fb0", O_RDONLY); // Try alternate path
+  }
+
+  if (fb_fd < 0)
+  {
+    return -1; // Failed to open framebuffer
+  }
+
+  if (ioctl(fb_fd, FBIOGET_VSCREENINFO, &vinfo) == -1)
+  {
+    close(fb_fd);
+    return -1; // Failed to get screen info
+  }
+
+  *width = vinfo.xres;
+  *height = vinfo.yres;
+
+  close(fb_fd);
+  return 0;
+}
+static int handle_mouse_postion(int rel_x, int rel_y)
+{
+  app_state.mouse.position_x += rel_x;
+  app_state.mouse.position_y += rel_y;
+  log_message("Mouse position: %d, %d", app_state.mouse.position_x, app_state.mouse.position_y);
+  if (app_state.mouse.position_x < 0)
+  {
+    app_state.mouse.position_x = 0;
+    /* scroll down */
+    libevdev_uinput_write_event(app_state.mouse.uidev, EV_REL, REL_HWHEEL, -1);
+  }
+  else if (app_state.mouse.position_x > app_state.screen_width)
+  {
+    app_state.mouse.position_x = app_state.screen_width;
+    libevdev_uinput_write_event(app_state.mouse.uidev, EV_REL, REL_HWHEEL, 1);
+  }
+
+  if (app_state.mouse.position_y < 0)
+  {
+    app_state.mouse.position_y = 0;
+    libevdev_uinput_write_event(app_state.mouse.uidev, EV_REL, REL_WHEEL, 1);
+  }
+  else if (app_state.mouse.position_y > app_state.screen_height)
+  {
+    app_state.mouse.position_y = app_state.screen_height;
+    libevdev_uinput_write_event(app_state.mouse.uidev, EV_REL, REL_WHEEL, -1);
+  }
+
+  return 0;
 }
 static int mouse_handle_event(device_t *dev, struct input_event *ev)
 {
@@ -410,24 +502,28 @@ static int mouse_handle_event(device_t *dev, struct input_event *ev)
     ev->type = EV_REL;
     ev->code = REL_Y;
     ev->value = -app_state.mouse.speed;
+    handle_mouse_postion(0, -app_state.mouse.speed);
     return CHANGED_TO_MOUSE;
 
   case KEY_DOWN:
     ev->type = EV_REL;
     ev->code = REL_Y;
     ev->value = app_state.mouse.speed;
+    handle_mouse_postion(0, app_state.mouse.speed);
     return CHANGED_TO_MOUSE;
 
   case KEY_LEFT:
     ev->type = EV_REL;
     ev->code = REL_X;
     ev->value = -app_state.mouse.speed;
+    handle_mouse_postion(-app_state.mouse.speed, 0);
     return CHANGED_TO_MOUSE;
 
   case KEY_RIGHT:
     ev->type = EV_REL;
     ev->code = REL_X;
     ev->value = app_state.mouse.speed;
+    handle_mouse_postion(app_state.mouse.speed, 0);
     return CHANGED_TO_MOUSE;
 
   case KEY_MENU: /* Scroll up */
@@ -709,7 +805,6 @@ static int run_event_loop(void)
       log_perror("select");
       break;
     }
-
     for (device_t *d = app_state.devices; d; d = d->next)
     {
       if (!FD_ISSET(d->fd, &rfds))
@@ -767,13 +862,14 @@ int main(int argc, char **argv)
   /* Set up signal handlers for clean shutdown */
   setup_signal_handlers();
 
-  /* Find and initialize input devices */
-  if (devices_find_and_init() != 0)
+  /* Get screen size */
+  if (get_screen_size(&app_state.screen_width, &app_state.screen_height) == -1)
   {
-    log_message("ERROR: Failed to find any supported input devices");
+    log_message("ERROR: Failed to get screen size");
     log_close();
     return 1;
   }
+  log_message("Screen size: %dx%d", app_state.screen_width, app_state.screen_height);
 
   /* Initialize virtual mouse */
   if (mouse_init() != 0)
@@ -784,6 +880,13 @@ int main(int argc, char **argv)
     return 1;
   }
 
+  /* Find and initialize input devices */
+  if (devices_find_and_init() != 0)
+  {
+    log_message("ERROR: Failed to find any supported input devices");
+    log_close();
+    return 1;
+  }
   /* Run the main event loop */
   int result = run_event_loop();
 
