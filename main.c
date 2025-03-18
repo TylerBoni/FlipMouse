@@ -271,33 +271,37 @@ static int mouse_init(void)
   /* Configure mouse capabilities */
   // libevdev_enable_event_code(app_state.mouse.dev, EV_REL, REL_X, NULL);
   // libevdev_enable_event_code(app_state.mouse.dev, EV_REL, REL_Y, NULL);
-  libevdev_enable_event_type(app_state.mouse.dev, EV_ABS);
   /* Configure X axis */
   struct input_absinfo abs_x = {
       .value = app_state.screen_width / 2,
       .minimum = 0,
-      .maximum = app_state.screen_width - 1,
+      .maximum = app_state.screen_width / 2,
       .flat = 0,
       .fuzz = 0,
       .resolution = 1 // 1 unit = 1 pixel
   };
-  libevdev_enable_event_code(app_state.mouse.dev, EV_ABS, ABS_X, &abs_x);
 
   /* Configure Y axis */
   struct input_absinfo abs_y = {
       .value = app_state.screen_height / 2,
       .minimum = 0,
-      .maximum = app_state.screen_height - 1,
+      .maximum = app_state.screen_height / 2,
       .flat = 0,
       .fuzz = 0,
       .resolution = 1 // 1 unit = 1 pixel
   };
-  libevdev_enable_event_code(app_state.mouse.dev, EV_ABS, ABS_Y, &abs_y);
+  libevdev_enable_event_type(app_state.mouse.dev, EV_ABS);
+  libevdev_enable_event_type(app_state.mouse.dev, EV_KEY);
+  libevdev_enable_event_type(app_state.mouse.dev, EV_REL);
 
   libevdev_enable_event_code(app_state.mouse.dev, EV_REL, REL_WHEEL, NULL);
   libevdev_enable_event_code(app_state.mouse.dev, EV_REL, REL_HWHEEL, NULL);
   libevdev_enable_event_code(app_state.mouse.dev, EV_KEY, BTN_LEFT, NULL);
   libevdev_enable_event_code(app_state.mouse.dev, EV_KEY, BTN_RIGHT, NULL);
+  libevdev_enable_event_code(app_state.mouse.dev, EV_ABS, ABS_MT_POSITION_X, &abs_x);
+  libevdev_enable_event_code(app_state.mouse.dev, EV_ABS, ABS_MT_POSITION_Y, &abs_y);
+  // libevdev_enable_event_code(app_state.mouse.dev, EV_ABS, ABS_MT_TRACKING_ID, NULL);
+  // libevdev_enable_event_code(app_state.mouse.dev, EV_ABS, ABS_MT_TOUCH_MAJOR, NULL);
 
   if (libevdev_uinput_create_from_device(app_state.mouse.dev,
                                          LIBEVDEV_UINPUT_OPEN_MANAGED,
@@ -428,8 +432,8 @@ static int handle_mouse_position(int rel_x, int rel_y)
     app_state.mouse.position_y = app_state.screen_height;
     libevdev_uinput_write_event(app_state.mouse.uidev, EV_REL, REL_WHEEL, -1);
   }
-  libevdev_uinput_write_event(app_state.mouse.uidev, EV_ABS, ABS_X, app_state.mouse.position_x);
-  libevdev_uinput_write_event(app_state.mouse.uidev, EV_ABS, ABS_Y, app_state.mouse.position_y);
+  libevdev_uinput_write_event(app_state.mouse.uidev, EV_ABS, ABS_MT_POSITION_X, app_state.mouse.position_x);
+  libevdev_uinput_write_event(app_state.mouse.uidev, EV_ABS, ABS_MT_POSITION_Y, app_state.mouse.position_y);
   libevdev_uinput_write_event(app_state.mouse.uidev, EV_SYN, SYN_REPORT, 0);
 
   return MUTE_EVENT;
