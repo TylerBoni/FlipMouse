@@ -3,7 +3,7 @@
  * tyler boni <tyler.boni@gmail.com>
  */
 
-// #define DEBUG 1
+#define DEBUG 1
 #include <linux/fb.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -269,8 +269,31 @@ static int mouse_init(void)
   libevdev_set_name(app_state.mouse.dev, "FlipMouse Virtual Mouse");
 
   /* Configure mouse capabilities */
-  libevdev_enable_event_code(app_state.mouse.dev, EV_REL, REL_X, NULL);
-  libevdev_enable_event_code(app_state.mouse.dev, EV_REL, REL_Y, NULL);
+  // libevdev_enable_event_code(app_state.mouse.dev, EV_REL, REL_X, NULL);
+  // libevdev_enable_event_code(app_state.mouse.dev, EV_REL, REL_Y, NULL);
+  libevdev_enable_event_type(app_state.mouse.dev, EV_ABS);
+  /* Configure X axis */
+  struct input_absinfo abs_x = {
+      .value = app_state.screen_width / 2,
+      .minimum = 0,
+      .maximum = app_state.screen_width - 1,
+      .flat = 0,
+      .fuzz = 0,
+      .resolution = 1 // 1 unit = 1 pixel
+  };
+  libevdev_enable_event_code(app_state.mouse.dev, EV_ABS, ABS_X, &abs_x);
+
+  /* Configure Y axis */
+  struct input_absinfo abs_y = {
+      .value = app_state.screen_height / 2,
+      .minimum = 0,
+      .maximum = app_state.screen_height - 1,
+      .flat = 0,
+      .fuzz = 0,
+      .resolution = 1 // 1 unit = 1 pixel
+  };
+  libevdev_enable_event_code(app_state.mouse.dev, EV_ABS, ABS_Y, &abs_y);
+
   libevdev_enable_event_code(app_state.mouse.dev, EV_REL, REL_WHEEL, NULL);
   libevdev_enable_event_code(app_state.mouse.dev, EV_REL, REL_HWHEEL, NULL);
   libevdev_enable_event_code(app_state.mouse.dev, EV_KEY, BTN_LEFT, NULL);
@@ -294,28 +317,6 @@ static int mouse_init(void)
   app_state.mouse.position_y = app_state.screen_height / 2;
 
   log_message("Virtual mouse initialized successfully");
-
-  /* add mouse to devices so we can get events */
-
-  device_t *mouse_dev = malloc(sizeof(device_t));
-  mouse_dev->fd = -1; /* No real fd for virtual device */
-  mouse_dev->name = "Virtual Mouse";
-  mouse_dev->evdev = app_state.mouse.dev;
-  mouse_dev->uidev = app_state.mouse.uidev;
-  mouse_dev->next = app_state.devices;
-  if (!app_state.devices)
-  {
-    log_message("Adding virtual mouse as first device");
-    app_state.devices = mouse_dev;
-  }
-  else
-  {
-    log_message("Adding virtual mouse to device list");
-    device_t *d = app_state.devices;
-    while (d->next)
-      d = d->next;
-    d->next = mouse_dev;
-  }
 
   return 0;
 }
@@ -400,7 +401,7 @@ int get_screen_size(int *width, int *height)
   close(fb_fd);
   return 0;
 }
-static int handle_mouse_postion(int rel_x, int rel_y)
+static int handle_mouse_position(int rel_x, int rel_y)
 {
   app_state.mouse.position_x += rel_x;
   app_state.mouse.position_y += rel_y;
@@ -427,8 +428,11 @@ static int handle_mouse_postion(int rel_x, int rel_y)
     app_state.mouse.position_y = app_state.screen_height;
     libevdev_uinput_write_event(app_state.mouse.uidev, EV_REL, REL_WHEEL, -1);
   }
+  libevdev_uinput_write_event(app_state.mouse.uidev, EV_ABS, ABS_X, app_state.mouse.position_x);
+  libevdev_uinput_write_event(app_state.mouse.uidev, EV_ABS, ABS_Y, app_state.mouse.position_y);
+  libevdev_uinput_write_event(app_state.mouse.uidev, EV_SYN, SYN_REPORT, 0);
 
-  return 0;
+  return MUTE_EVENT;
 }
 static int mouse_handle_event(device_t *dev, struct input_event *ev)
 {
@@ -499,32 +503,28 @@ static int mouse_handle_event(device_t *dev, struct input_event *ev)
     break;
 
   case KEY_UP:
-    ev->type = EV_REL;
-    ev->code = REL_Y;
-    ev->value = -app_state.mouse.speed;
-    handle_mouse_postion(0, -app_state.mouse.speed);
-    return CHANGED_TO_MOUSE;
+    //    ev->type = EV_REL;
+    //    ev->code = REL_Y;
+    //    ev->value = -app_state.mouse.speed;
+    return handle_mouse_position(0, -app_state.mouse.speed);
 
   case KEY_DOWN:
-    ev->type = EV_REL;
-    ev->code = REL_Y;
-    ev->value = app_state.mouse.speed;
-    handle_mouse_postion(0, app_state.mouse.speed);
-    return CHANGED_TO_MOUSE;
+    //    ev->type = EV_REL;
+    //    ev->code = REL_Y;
+    //    ev->value = app_state.mouse.speed;
+    return handle_mouse_position(0, app_state.mouse.speed);
 
   case KEY_LEFT:
-    ev->type = EV_REL;
-    ev->code = REL_X;
-    ev->value = -app_state.mouse.speed;
-    handle_mouse_postion(-app_state.mouse.speed, 0);
-    return CHANGED_TO_MOUSE;
+    //    ev->type = EV_REL;
+    //    ev->code = REL_X;
+    //    ev->value = -app_state.mouse.speed;
+    return handle_mouse_position(-app_state.mouse.speed, 0);
 
   case KEY_RIGHT:
-    ev->type = EV_REL;
-    ev->code = REL_X;
-    ev->value = app_state.mouse.speed;
-    handle_mouse_postion(app_state.mouse.speed, 0);
-    return CHANGED_TO_MOUSE;
+    //    ev->type = EV_REL;
+    //    ev->code = REL_X;
+    //    ev->value = app_state.mouse.speed;
+    return handle_mouse_position(app_state.mouse.speed, 0);
 
   case KEY_MENU: /* Scroll up */
     if (slowdown_counter++ % WHEEL_SLOWDOWN_FACTOR)
@@ -870,6 +870,13 @@ int main(int argc, char **argv)
     return 1;
   }
   log_message("Screen size: %dx%d", app_state.screen_width, app_state.screen_height);
+  /* Find and initialize input devices */
+  if (devices_find_and_init() != 0)
+  {
+    log_message("ERROR: Failed to find any supported input devices");
+    log_close();
+    return 1;
+  }
 
   /* Initialize virtual mouse */
   if (mouse_init() != 0)
@@ -880,13 +887,6 @@ int main(int argc, char **argv)
     return 1;
   }
 
-  /* Find and initialize input devices */
-  if (devices_find_and_init() != 0)
-  {
-    log_message("ERROR: Failed to find any supported input devices");
-    log_close();
-    return 1;
-  }
   /* Run the main event loop */
   int result = run_event_loop();
 
